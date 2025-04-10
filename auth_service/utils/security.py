@@ -1,3 +1,4 @@
+# auth_service/utils/security.py
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from passlib.context import CryptContext
@@ -8,19 +9,17 @@ from sqlalchemy import select
 import models
 import schemas
 from database import get_db
-
+from config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
-
-# Секретный ключ для JWT (лучше брать из переменных окружения)
-SECRET_KEY = "your_very_secure_secret_key"
+# Секретный ключ для JWT из настроек
+SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Настройка для хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def get_password_hash(password: str) -> str:
     """
@@ -28,13 +27,11 @@ def get_password_hash(password: str) -> str:
     """
     return pwd_context.hash(password)
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Проверяет пароль
     """
     return pwd_context.verify(plain_password, hashed_password)
-
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     """
@@ -45,7 +42,6 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return token
-
 
 async def authenticate_user(db: AsyncSession, username: str, password: str):
     """
@@ -79,13 +75,17 @@ def verify_token(token: str) -> schemas.TokenData:
     except JWTError:
         raise credentials_exception
 
-
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.User:
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> models.User:
     """
     Зависимость для получения текущего пользователя из JWT токена.
     """
     token_data = verify_token(token)
-    user = models.User(username=token_data.username)
+    user = await db.execute(select(models.User).where(models.User.username == token_data.username))
+    user = user.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
-
-
