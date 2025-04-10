@@ -358,7 +358,7 @@ DB_HOST=auth_db
 DB_PORT=5432
 DB_NAME=AuthDB
 DB_USER=postgres
-DB_PASSWORD=Tabasalu7
+DB_PASSWORD=postgres
 RABBITMQ_HOST=rabbitmq
 RABBITMQ_PORT=5672
 JWT_SECRET_KEY=your_very_secure_random_key_32_chars_long
@@ -416,26 +416,6 @@ datefmt = %H:%M:%S
 
 
 ===== auth_service/config.py =====
-# from pydantic_settings import BaseSettings, SettingsConfigDict
-#
-# class AuthSettings(BaseSettings):
-#     model_config = SettingsConfigDict(
-#         env_file='.env.local', extra='ignore', case_sensitive=False
-#     )
-#
-#     db_host: str = 'auth_db'
-#     db_port: int = 5432
-#     db_name: str = 'AuthDB'
-#     db_user: str = 'postgres'
-#     db_password: str = 'postgres'
-#
-#     @property
-#     def async_database_url(self) -> str:
-#         return f'postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}'
-#
-# settings = AuthSettings()
-
-# auth_service/config.py
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class AuthSettings(BaseSettings):
@@ -447,7 +427,7 @@ class AuthSettings(BaseSettings):
     db_port: int = 5432
     db_name: str = 'AuthDB'
     db_user: str = 'postgres'
-    db_password: str = 'Tabasalu7'
+    db_password: str = 'postgres'
     jwt_secret_key: str
 
     @property
@@ -455,7 +435,6 @@ class AuthSettings(BaseSettings):
         return f'postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}'
 
 settings = AuthSettings()
-
 
 
 
@@ -493,11 +472,11 @@ async def get_db():
 
 
 ===== auth_service/docker-entrypoint.sh =====
-# auth_service/docker-entrypoint.sh
-#!/bin/bash
+#!/bin/sh
 set -e
 
-# Проверяем наличие переменных окружения
+echo "Starting docker-entrypoint.sh..."
+
 if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
   echo "Error: DB_HOST and DB_PORT must be set"
   exit 1
@@ -539,7 +518,6 @@ exec uvicorn main:app --host 0.0.0.0 --port 8003
 
 
 ===== auth_service/Dockerfile =====
-# auth_service/Dockerfile
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
@@ -547,23 +525,18 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY . /app
 
-# Устанавливаем зависимости и bash (для совместимости)
 RUN apt-get update && apt-get install -y \
     netcat-openbsd \
-    bash \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем Python-зависимости
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Гарантируем, что файл исполняемый
 RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8003
 
-# Указываем полный путь для надёжности
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 
@@ -723,9 +696,9 @@ class UserRead(BaseModel):
 
 
 
-===== auth_service/nginx.conf =====
-user  nginx;
-worker_processes  1;
+===== nginx.conf =====
+user nginx;
+worker_processes 1;
 
 events {
     worker_connections 1024;
@@ -733,28 +706,26 @@ events {
 
 http {
     upstream auth_service {
-        server auth_service_backend:8080;
+        server auth_service:8003;
     }
 
     upstream post_service {
-        server post_service_backend:8081;
+        server post_service:8006;
     }
 
     upstream subscription_service {
-        server subscription_service_backend:8082;
+        server subscription_service:8007;
     }
 
     upstream admin_service {
-        server admin_service_backend:8083;
+        server admin_service:8009;
     }
-
-
 
     server {
         listen 80;
 
         location /auth/ {
-            proxy_pass http://auth_service;
+            proxy_pass http://auth_service/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -762,11 +733,11 @@ http {
         }
 
         location /post/ {
-            auth_request /auth;
+            auth_request /auth/verify;
             auth_request_set $auth_status $upstream_status;
 
             if ($auth_status = 200) {
-                proxy_pass http://post_service;
+                proxy_pass http://post_service/;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -783,11 +754,11 @@ http {
         }
 
         location /subscription/ {
-            auth_request /auth;
+            auth_request /auth/verify;
             auth_request_set $auth_status $upstream_status;
 
             if ($auth_status = 200) {
-                proxy_pass http://subscription_service;
+                proxy_pass http://subscription_service/;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -803,9 +774,9 @@ http {
             }
         }
 
-        location = /auth {
+        location = /auth/verify {
             internal;
-            proxy_pass http://auth_service;
+            proxy_pass http://auth_service/auth/verify;
             proxy_set_header Content-Length "";
             proxy_set_header X-Original-URI $request_uri;
         }
@@ -816,7 +787,7 @@ http {
 
 
 
-===== auth_service/pytest.ini =====
+===== pytest.ini =====
 [pytest]
 pythonpath = .
 

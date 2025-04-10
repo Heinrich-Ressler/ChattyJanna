@@ -1,8 +1,8 @@
-# auth_service/docker-entrypoint.sh
-#!/bin/bash
+#!/bin/sh
 set -e
 
-# Проверяем наличие переменных окружения
+echo "Starting docker-entrypoint.sh..."
+
 if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
   echo "Error: DB_HOST and DB_PORT must be set"
   exit 1
